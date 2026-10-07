@@ -1,0 +1,407 @@
+{
+  "info": {
+    "name": "Inventario · 07 Expiración de reservas",
+    "description": "Caso de uso 7 (§7.A): una reserva FLASH_SALE expira a los 5 min y sus unidades vuelven sin ningún job.\n\nCarpeta A crea la reserva; la primera request de la carpeta B ESPERA automáticamente hasta que expire (≈ 5 min). En Newman usa `--timeout-script 400000`; en el Runner de Postman no hay límite de script por defecto. Alternativa rápida (adelantar expires_at en la BD): ver §7.B de docs/CURL-CASOS-DE-USO.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "mailUrl",
+      "value": "http://localhost:8025"
+    },
+    {
+      "key": "S",
+      "value": ""
+    },
+    {
+      "key": "e1ExpiresMs",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "A · Crear reserva (ahora)",
+      "item": [
+        {
+          "name": "0. Inicializar (sufijo único S)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('S', Date.now().toString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"readiness UP\", function () { pm.expect(pm.response.json().status).to.eql(\"UP\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/health/readiness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "health",
+                "readiness"
+              ]
+            },
+            "description": "Genera un sufijo único `S` por ejecución para no chocar con corridas anteriores (un orderId no puede reutilizarse con otros datos)."
+          },
+          "response": []
+        },
+        {
+          "name": "7.1 Registrar FLASH_SALE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/EXP-{{S}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "products",
+                "EXP-{{S}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"category\":\"FLASH_SALE\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.2 Stock 2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"available = 2\", function () { pm.expect(pm.response.json().available).to.eql(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/EXP-{{S}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "products",
+                "EXP-{{S}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"quantity\":2}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.3 Reservar 2 → 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const j = pm.response.json();",
+                  "pm.test(\"body has orderId, sku, quantity, expiresAt\", function () { pm.expect(j).to.have.all.keys(\"orderId\", \"sku\", \"quantity\", \"expiresAt\"); });",
+                  "pm.collectionVariables.set('e1ExpiresMs', String(new Date(j.expiresAt).getTime()));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"orderId\":\"E1-{{S}}\",\"sku\":\"EXP-{{S}}\",\"quantity\":2}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.4 Disponibilidad 0 mientras la reserva está activa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"available = 0\", function () { pm.expect(pm.response.json().available).to.eql(0); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/EXP-{{S}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "products",
+                "EXP-{{S}}",
+                "availability"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "B · Tras 5 minutos",
+      "item": [
+        {
+          "name": "7.5 Las unidades volvieron solas → available 2 (espera hasta expirar)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const target = Number(pm.collectionVariables.get(\"e1ExpiresMs\"));",
+                  "const wait = target - Date.now() + 1500;",
+                  "if (wait > 0) { console.log(\"Esperando \" + Math.ceil(wait / 1000) + \" s hasta que expire la reserva…\"); setTimeout(function () {}, wait); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"available = 2\", function () { pm.expect(pm.response.json().available).to.eql(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/EXP-{{S}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "products",
+                "EXP-{{S}}",
+                "availability"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.6 Confirmar reserva expirada → 409 NO_ACTIVE_RESERVATION",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"errorCode NO_ACTIVE_RESERVATION\", function () { pm.expect(pm.response.json().errorCode).to.eql(\"NO_ACTIVE_RESERVATION\"); });",
+                  "pm.test(\"application/problem+json\", function () { pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reservations/E1-{{S}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reservations",
+                "E1-{{S}}",
+                "confirm"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.7 Otro cliente reutiliza esas unidades → 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const j = pm.response.json();",
+                  "pm.test(\"body has orderId, sku, quantity, expiresAt\", function () { pm.expect(j).to.have.all.keys(\"orderId\", \"sku\", \"quantity\", \"expiresAt\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"orderId\":\"E2-{{S}}\",\"sku\":\"EXP-{{S}}\",\"quantity\":2}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.8 Disponibilidad 0 otra vez",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"available = 0\", function () { pm.expect(pm.response.json().available).to.eql(0); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/EXP-{{S}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "products",
+                "EXP-{{S}}",
+                "availability"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

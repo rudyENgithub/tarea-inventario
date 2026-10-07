@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: inventory-reservations
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5435/inventory}
+    username: ${SPRING_DATASOURCE_USERNAME:inventory}
+    password: ${SPRING_DATASOURCE_PASSWORD:inventory}
+    hikari:
+      maximum-pool-size: 20
+      connection-timeout: 5000
+      maximum-lifetime: 1800000
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+    properties:
+      mail:
+        smtp:
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  health:
+    mail:
+      enabled: false
+
+inventory:
+  low-stock:
+    threshold: 5
+  alerts:
+    relay:
+      poll-interval: 5s
+    dispatch:
+      batch-size: 50
+      lease: 2m
+      max-attempts: 5
+      base-delay: 30s
+      max-delay: 15m
+    email:
+      enabled: false
+  database:
+    lock-timeout: 5s

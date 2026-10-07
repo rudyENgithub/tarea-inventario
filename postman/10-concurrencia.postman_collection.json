@@ -1,0 +1,681 @@
+{
+  "info": {
+    "name": "Inventario · 10 Concurrencia (cero sobreventa e idempotencia paralela)",
+    "description": "Caso de uso 11 (§11): las peticiones paralelas se disparan desde un script de pre-request con pm.sendRequest; los tests validan los totales.\n\nLa alerta única bajo concurrencia (11.4) se comprueba con Mailpit (requiere Compose).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "mailUrl",
+      "value": "http://localhost:8025"
+    },
+    {
+      "key": "S",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Inicializar (sufijo único S)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('S', Date.now().toString());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"readiness UP\", function () { pm.expect(pm.response.json().status).to.eql(\"UP\"); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/actuator/health/readiness",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "actuator",
+            "health",
+            "readiness"
+          ]
+        },
+        "description": "Genera un sufijo único `S` por ejecución para no chocar con corridas anteriores (un orderId no puede reutilizarse con otros datos)."
+      },
+      "response": []
+    },
+    {
+      "name": "10.1a Registrar HOT",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 204\", function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/HOT-{{S}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "HOT-{{S}}"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"category\":\"STANDARD\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.1b Stock 50",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 50\", function () { pm.expect(pm.response.json().available).to.eql(50); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/HOT-{{S}}/stock",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "HOT-{{S}}",
+            "stock"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"quantity\":50}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.1c 200 reservas simultáneas sobre 50 u. → exactamente 50×200 y 150×409",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const N = 200;",
+              "const codes = {}; const bodies = {}; let finished = 0;",
+              "for (let i = 1; i <= N; i++) {",
+              "  pm.sendRequest({ url: pm.variables.get('baseUrl') + '/api/v1/reservations', method: 'POST', header: { 'Content-Type': 'application/json' }, body: { mode: 'raw', raw: JSON.stringify({ orderId: 'H' + i + '-' + pm.variables.get('S'), sku: 'HOT-' + pm.variables.get('S'), quantity: 1 }) } }, function (e, res) {",
+              "    const code = e ? 0 : res.code;",
+              "    codes[code] = (codes[code] || 0) + 1;",
+              "    if (!e && res.code === 200) { bodies[res.text()] = true; }",
+              "    finished++;",
+              "    if (finished === N) { pm.collectionVariables.set('hot', JSON.stringify({ codes: codes, distinct: Object.keys(bodies).length })); }",
+              "  });",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = JSON.parse(pm.collectionVariables.get('hot'));",
+              "pm.test(\"50 × 200\", function () { pm.expect(r.codes[200]).to.eql(50); });",
+              "pm.test(\"150 × 409\", function () { pm.expect(r.codes[409]).to.eql(150); });",
+              "pm.test(\"ningún 500 / error\", function () { pm.expect(Object.keys(r.codes).sort()).to.eql([\"200\", \"409\"]); });",
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 0\", function () { pm.expect(pm.response.json().available).to.eql(0); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/HOT-{{S}}/availability",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "HOT-{{S}}",
+            "availability"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.2a Registrar IDEM",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 204\", function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/IDEM-{{S}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "IDEM-{{S}}"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"category\":\"STANDARD\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.2b Stock 10",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 10\", function () { pm.expect(pm.response.json().available).to.eql(10); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/IDEM-{{S}}/stock",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "IDEM-{{S}}",
+            "stock"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"quantity\":10}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.2c 30 reintentos simultáneos del MISMO pedido → una sola respuesta distinta; se descuenta una vez",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const N = 30;",
+              "const codes = {}; const bodies = {}; let finished = 0;",
+              "for (let i = 1; i <= N; i++) {",
+              "  pm.sendRequest({ url: pm.variables.get('baseUrl') + '/api/v1/reservations', method: 'POST', header: { 'Content-Type': 'application/json' }, body: { mode: 'raw', raw: JSON.stringify({ orderId: 'SAME-' + pm.variables.get('S'), sku: 'IDEM-' + pm.variables.get('S'), quantity: 3 }) } }, function (e, res) {",
+              "    const code = e ? 0 : res.code;",
+              "    codes[code] = (codes[code] || 0) + 1;",
+              "    if (!e && res.code === 200) { bodies[res.text()] = true; }",
+              "    finished++;",
+              "    if (finished === N) { pm.collectionVariables.set('idem', JSON.stringify({ codes: codes, distinct: Object.keys(bodies).length })); }",
+              "  });",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = JSON.parse(pm.collectionVariables.get('idem'));",
+              "pm.test(\"30 × 200\", function () { pm.expect(r.codes[200]).to.eql(30); });",
+              "pm.test(\"1 única respuesta distinta\", function () { pm.expect(r.distinct).to.eql(1); });",
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 7\", function () { pm.expect(pm.response.json().available).to.eql(7); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/IDEM-{{S}}/availability",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "IDEM-{{S}}",
+            "availability"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.3a Reservar CC (2 u.)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "const j = pm.response.json();",
+              "pm.test(\"body has orderId, sku, quantity, expiresAt\", function () { pm.expect(j).to.have.all.keys(\"orderId\", \"sku\", \"quantity\", \"expiresAt\"); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/reservations",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "reservations"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"orderId\":\"CC-{{S}}\",\"sku\":\"IDEM-{{S}}\",\"quantity\":2}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.3b 30 confirmaciones simultáneas → 30×204; el stock se descuenta una vez",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const N = 30;",
+              "const codes = {}; const bodies = {}; let finished = 0;",
+              "for (let i = 1; i <= N; i++) {",
+              "  pm.sendRequest({ url: pm.variables.get('baseUrl') + '/api/v1/reservations/CC-' + pm.variables.get('S') + '/confirm', method: 'POST' }, function (e, res) {",
+              "    const code = e ? 0 : res.code;",
+              "    codes[code] = (codes[code] || 0) + 1;",
+              "    if (!e && res.code === 200) { bodies[res.text()] = true; }",
+              "    finished++;",
+              "    if (finished === N) { pm.collectionVariables.set('conf', JSON.stringify({ codes: codes, distinct: Object.keys(bodies).length })); }",
+              "  });",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = JSON.parse(pm.collectionVariables.get('conf'));",
+              "pm.test(\"30 × 204\", function () { pm.expect(r.codes[204]).to.eql(30); });",
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 5\", function () { pm.expect(pm.response.json().available).to.eql(5); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/IDEM-{{S}}/availability",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "IDEM-{{S}}",
+            "availability"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.4a Registrar ONE",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 204\", function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/ONE-{{S}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "ONE-{{S}}"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"category\":\"STANDARD\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.4b Stock 30",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 30\", function () { pm.expect(pm.response.json().available).to.eql(30); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/ONE-{{S}}/stock",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "ONE-{{S}}",
+            "stock"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"quantity\":30}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.4c Vaciar buzón de Mailpit",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{mailUrl}}/api/v1/messages",
+          "host": [
+            "{{mailUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "messages"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.4d 28 reservas simultáneas (cruzan el umbral)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const N = 28;",
+              "const codes = {}; const bodies = {}; let finished = 0;",
+              "for (let i = 1; i <= N; i++) {",
+              "  pm.sendRequest({ url: pm.variables.get('baseUrl') + '/api/v1/reservations', method: 'POST', header: { 'Content-Type': 'application/json' }, body: { mode: 'raw', raw: JSON.stringify({ orderId: 'ON' + i + '-' + pm.variables.get('S'), sku: 'ONE-' + pm.variables.get('S'), quantity: 1 }) } }, function (e, res) {",
+              "    const code = e ? 0 : res.code;",
+              "    codes[code] = (codes[code] || 0) + 1;",
+              "    if (!e && res.code === 200) { bodies[res.text()] = true; }",
+              "    finished++;",
+              "    if (finished === N) { pm.collectionVariables.set('one', JSON.stringify({ codes: codes, distinct: Object.keys(bodies).length })); }",
+              "  });",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = JSON.parse(pm.collectionVariables.get('one'));",
+              "pm.test(\"28 × 200\", function () { pm.expect(r.codes[200]).to.eql(28); });",
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 2\", function () { pm.expect(pm.response.json().available).to.eql(2); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/products/ONE-{{S}}/availability",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "ONE-{{S}}",
+            "availability"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10.4e Alerta única bajo concurrencia: 1 solo correo para ONE-S",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "setTimeout(function () {}, 3000);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"correos en Mailpit = 1\", function () { pm.expect(pm.response.json().total).to.eql(1); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{mailUrl}}/api/v1/search?query=ONE-{{S}}",
+          "host": [
+            "{{mailUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "search"
+          ],
+          "query": [
+            {
+              "key": "query",
+              "value": "ONE-{{S}}"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

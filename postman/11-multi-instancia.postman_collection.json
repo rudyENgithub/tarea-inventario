@@ -1,0 +1,378 @@
+{
+  "info": {
+    "name": "Inventario · 11 Multi-instancia",
+    "description": "Caso de uso 12 (§12): dos réplicas comparten la misma BD.\n\nLevantar con `docker compose up -d --scale app=2` y apuntar baseUrlA / baseUrlB a los puertos reales (`docker compose port --index 1 app 8080` y `--index 2`).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "mailUrl",
+      "value": "http://localhost:8025"
+    },
+    {
+      "key": "S",
+      "value": ""
+    },
+    {
+      "key": "baseUrlA",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "baseUrlB",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "mi1Expires",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Inicializar y comprobar ambas réplicas",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('S', Date.now().toString());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrlA}}/actuator/health/readiness",
+          "host": [
+            "{{baseUrlA}}"
+          ],
+          "path": [
+            "actuator",
+            "health",
+            "readiness"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "0b. Réplica B lista",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrlB}}/actuator/health/readiness",
+          "host": [
+            "{{baseUrlB}}"
+          ],
+          "path": [
+            "actuator",
+            "health",
+            "readiness"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11.1 Registrar en A",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 204\", function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrlA}}/api/v1/products/MI-{{S}}",
+          "host": [
+            "{{baseUrlA}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "MI-{{S}}"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"category\":\"STANDARD\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11.2 Agregar stock 40 en B",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 40\", function () { pm.expect(pm.response.json().available).to.eql(40); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrlB}}/api/v1/products/MI-{{S}}/stock",
+          "host": [
+            "{{baseUrlB}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "MI-{{S}}",
+            "stock"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"quantity\":40}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11.3 Reservar 3 en A",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "const j = pm.response.json();",
+              "pm.test(\"body has orderId, sku, quantity, expiresAt\", function () { pm.expect(j).to.have.all.keys(\"orderId\", \"sku\", \"quantity\", \"expiresAt\"); });",
+              "pm.collectionVariables.set('mi1Expires', j.expiresAt);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrlA}}/api/v1/reservations",
+          "host": [
+            "{{baseUrlA}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "reservations"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"orderId\":\"MI1-{{S}}\",\"sku\":\"MI-{{S}}\",\"quantity\":3}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11.4 Disponibilidad en B = 37 (los datos de A se ven en B)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 37\", function () { pm.expect(pm.response.json().available).to.eql(37); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrlB}}/api/v1/products/MI-{{S}}/availability",
+          "host": [
+            "{{baseUrlB}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "MI-{{S}}",
+            "availability"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11.5 Idempotencia entre instancias: mismo pedido en B → misma reserva",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "const j = pm.response.json();",
+              "pm.test(\"body has orderId, sku, quantity, expiresAt\", function () { pm.expect(j).to.have.all.keys(\"orderId\", \"sku\", \"quantity\", \"expiresAt\"); });",
+              "pm.test(\"mismo expiresAt que en A\", function () { pm.expect(j.expiresAt).to.eql(pm.collectionVariables.get(\"mi1Expires\")); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrlB}}/api/v1/reservations",
+          "host": [
+            "{{baseUrlB}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "reservations"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"orderId\":\"MI1-{{S}}\",\"sku\":\"MI-{{S}}\",\"quantity\":3}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11.6 100 reservas repartidas entre A y B (37 libres) → 37×200 y 63×409",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const N = 100;",
+              "const codes = {}; const bodies = {}; let finished = 0;",
+              "for (let i = 1; i <= N; i++) {",
+              "  pm.sendRequest({ url: (i % 2 === 0 ? pm.variables.get('baseUrlA') : pm.variables.get('baseUrlB')) + '/api/v1/reservations', method: 'POST', header: { 'Content-Type': 'application/json' }, body: { mode: 'raw', raw: JSON.stringify({ orderId: 'MX' + i + '-' + pm.variables.get('S'), sku: 'MI-' + pm.variables.get('S'), quantity: 1 }) } }, function (e, res) {",
+              "    const code = e ? 0 : res.code;",
+              "    codes[code] = (codes[code] || 0) + 1;",
+              "    if (!e && res.code === 200) { bodies[res.text()] = true; }",
+              "    finished++;",
+              "    if (finished === N) { pm.collectionVariables.set('mi', JSON.stringify({ codes: codes, distinct: Object.keys(bodies).length })); }",
+              "  });",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = JSON.parse(pm.collectionVariables.get('mi'));",
+              "pm.test(\"37 × 200\", function () { pm.expect(r.codes[200]).to.eql(37); });",
+              "pm.test(\"63 × 409\", function () { pm.expect(r.codes[409]).to.eql(63); });",
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"available = 0\", function () { pm.expect(pm.response.json().available).to.eql(0); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrlA}}/api/v1/products/MI-{{S}}/availability",
+          "host": [
+            "{{baseUrlA}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products",
+            "MI-{{S}}",
+            "availability"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

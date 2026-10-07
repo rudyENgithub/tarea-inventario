@@ -1,0 +1,10 @@
+target/
+.git/
+.idea/
+.vscode/
+*.md
+docs/
+.env
+*.iml
+.cursor/
+AGENTS.md
